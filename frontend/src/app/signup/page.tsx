@@ -48,7 +48,7 @@ export default function SignupPage() {
         adminKey: role === "Admin" ? adminKey : undefined,
       });
       toast.success("Account created");
-      router.replace("/");
+        // Let the useEffect handle the redirect once workspace is loaded
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not create account");
     }

@@ -40,7 +40,7 @@ export default function LoginPage() {
     try {
       await login(email.trim(), password);
       toast.success("Signed in");
-      router.replace("/");
+        // Let the useEffect handle the redirect once workspace is loaded
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Sign in failed");
     }

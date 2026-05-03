@@ -34,7 +34,7 @@ async function authenticateToken(req, res, next) {
     }
 
     const payload = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-    const user = await User.findById(payload.sub).select('-passwordHash -refreshTokenHash').lean();
+      const user = await User.findById(payload.sub).select('-passwordHash').lean();
 
     if (!user) {
       console.log('Token valid but user not found', payload.sub);

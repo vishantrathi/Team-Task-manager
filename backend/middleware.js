@@ -21,7 +21,7 @@ function getAccessToken(req) {
     console.log('Cookie parsing error', e && e.message);
   }
 
-  return req.cookies?.accessToken;
+  return req.cookies?.token || req.cookies?.accessToken;
 }
 
 async function authenticateToken(req, res, next) {
@@ -96,8 +96,9 @@ function validate(schema, source = 'body') {
     const result = schema.safeParse(req[source]);
 
     if (!result.success) {
+      const firstIssue = result.error.issues[0];
       return res.status(400).json({
-        error: 'Validation failed',
+        error: firstIssue?.message || 'Validation failed',
         issues: result.error.flatten(),
       });
     }

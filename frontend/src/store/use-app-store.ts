@@ -296,7 +296,7 @@ export const useAppStore = create<AppState>()(
         try {
           await apiRequest("/auth/login", {
             method: "POST",
-            body: JSON.stringify({ email, password }),
+            body: JSON.stringify({ email: email.trim(), password }),
           });
           await get().initializeWorkspace();
           set({ authenticating: false, error: null });
@@ -313,7 +313,12 @@ export const useAppStore = create<AppState>()(
         try {
           await apiRequest("/auth/signup/send-otp", {
             method: "POST",
-            body: JSON.stringify(input),
+            body: JSON.stringify({
+              ...input,
+              name: input.name.trim(),
+              email: input.email.trim(),
+              adminKey: input.adminKey?.trim(),
+            }),
           });
           set({ authenticating: false, error: null });
         } catch (error) {

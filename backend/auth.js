@@ -18,10 +18,14 @@ const loginSchema = z.object({
 
 const signupSendOtpSchema = z.object({
   name: z.string().trim().min(2).max(80),
-  email: z.string().trim().email(),
+  email: z.string().trim().email().optional(),
+  userEmail: z.string().trim().email().optional(),
   password: passwordField,
   role: z.enum(['Admin', 'Member']).optional(),
   adminKey: z.string().optional(),
+}).refine((data) => Boolean(data.email || data.userEmail), {
+  message: 'Email is required',
+  path: ['email'],
 });
 
 const signupVerifySchema = z.object({
@@ -77,6 +81,13 @@ function setAuthCookies(res, accessToken, refreshToken) {
     secure,
     maxAge: 15 * 60 * 1000,
   });
+  res.cookie('token', accessToken, {
+    httpOnly: true,
+    path: '/',
+    sameSite: secure ? 'none' : 'lax',
+    secure,
+    maxAge: 15 * 60 * 1000,
+  });
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     path: '/',
@@ -114,8 +125,15 @@ async function respondWithSession(res, user) {
 /** Step 1: validate input, store hashed password + OTP, send email */
 router.post('/signup/send-otp', validate(signupSendOtpSchema), async (req, res, next) => {
   try {
-    const { name, email, password, role, adminKey } = req.body;
-    const normalizedEmail = email.toLowerCase().trim();
+    const { name, email, userEmail, password, role, adminKey } = req.body;
+    const normalizedEmail = String(email || userEmail || '').toLowerCase().trim();
+
+    console.log('signup/send-otp body:', {
+      name: name?.trim?.() || '',
+      email: normalizedEmail,
+      role: role || 'Member',
+      hasAdminKey: Boolean(adminKey),
+    });
 
     const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
@@ -143,7 +161,6 @@ router.post('/signup/send-otp', validate(signupSendOtpSchema), async (req, res, 
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    await sendSignupOtpEmail(normalizedEmail, otp, name.trim());
     try {
       await sendSignupOtpEmail(normalizedEmail, otp, name.trim());
     } catch (mailError) {
@@ -281,6 +298,7 @@ router.post('/logout', authenticateToken, async (req, res, next) => {
     const secure = process.env.NODE_ENV === 'production';
     const sameSite = secure ? 'none' : 'lax';
     res.clearCookie('accessToken', { httpOnly: true, path: '/', secure, sameSite });
+    res.clearCookie('token', { httpOnly: true, path: '/', secure, sameSite });
     res.clearCookie('refreshToken', { httpOnly: true, path: '/', secure, sameSite });
     return res.json({ success: true });
   } catch (error) {

@@ -1,0 +1,302 @@
+const express = require('express');
+const { z } = require('zod');
+const { authenticateToken, validate } = require('./middleware');
+const { Activity, Comment, Project, Task, User } = require('./models');
+
+const router = express.Router();
+
+const taskSchema = z.object({
+  projectId: z.string().min(1),
+  title: z.string().trim().min(2).max(160),
+  description: z.string().trim().max(6000).optional().default(''),
+  assigneeId: z.string().min(1).optional().nullable(),
+  dueDate: z.string().optional().nullable(),
+  priority: z.enum(['Low', 'Medium', 'High', 'Urgent']).optional().default('Medium'),
+  labels: z.array(z.string().trim().min(1).max(32)).optional().default([]),
+  status: z.enum(['To Do', 'In Progress', 'Review', 'Done']).optional().default('To Do'),
+  attachments: z.array(z.object({
+    name: z.string(),
+    url: z.string(),
+    mimeType: z.string().optional(),
+    size: z.number().optional(),
+  })).optional().default([]),
+});
+
+const taskUpdateSchema = z.object({
+  title: z.string().trim().min(2).max(160).optional(),
+  description: z.string().trim().max(6000).optional(),
+  assigneeId: z.string().min(1).optional().nullable(),
+  dueDate: z.string().optional().nullable(),
+  priority: z.enum(['Low', 'Medium', 'High', 'Urgent']).optional(),
+  labels: z.array(z.string().trim().min(1).max(32)).optional(),
+  status: z.enum(['To Do', 'In Progress', 'Review', 'Done']).optional(),
+}).strict().refine((data) => Object.keys(data).length > 0, { message: 'At least one field is required' });
+
+const commentSchema = z.object({
+  body: z.string().trim().min(1).max(3000),
+});
+
+router.get('/', authenticateToken, async (req, res, next) => {
+  try {
+    let projectScope = {};
+    if (req.user.role !== 'Admin') {
+      const accessibleIds = await Project.find({
+        archivedAt: null,
+        $or: [{ owner: req.user._id }, { members: req.user._id }],
+      }).distinct('_id');
+
+      if (req.query.projectId) {
+        const allowed = accessibleIds.some((id) => String(id) === String(req.query.projectId));
+        if (!allowed) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
+        projectScope = { project: req.query.projectId };
+      } else {
+        projectScope = { project: { $in: accessibleIds } };
+      }
+    } else if (req.query.projectId) {
+      projectScope = { project: req.query.projectId };
+    }
+
+    const filters = {
+      archivedAt: null,
+      ...projectScope,
+      ...(req.query.status ? { status: req.query.status } : {}),
+      ...(req.query.priority ? { priority: req.query.priority } : {}),
+      ...(req.query.assignee ? { assignee: req.query.assignee } : {}),
+      ...(req.query.q ? { title: { $regex: req.query.q, $options: 'i' } } : {}),
+    };
+
+    const tasks = await Task.find(filters)
+      .populate('project', 'name color archivedAt')
+      .populate('assignee', 'name email role avatarColor title')
+      .populate('createdBy', 'name email role avatarColor title')
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    return res.json({ tasks });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/', authenticateToken, validate(taskSchema), async (req, res, next) => {
+  try {
+    const project = await Project.findById(req.body.projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const canAccess = req.user.role === 'Admin' || String(project.owner) === String(req.user._id) || project.members.some((member) => String(member) === String(req.user._id));
+    if (!canAccess) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const assignee = req.body.assigneeId ? await User.findById(req.body.assigneeId).select('_id') : null;
+
+    const task = await Task.create({
+      project: project._id,
+      title: req.body.title,
+      description: req.body.description,
+      assignee: assignee?._id || null,
+      createdBy: req.user._id,
+      dueDate: req.body.dueDate ? new Date(req.body.dueDate) : null,
+      priority: req.body.priority,
+      labels: req.body.labels,
+      status: req.body.status,
+      attachments: req.body.attachments,
+    });
+
+    await Activity.create({
+      project: project._id,
+      task: task._id,
+      actor: req.user._id,
+      type: 'task.created',
+      title: 'Task created',
+      detail: task.title,
+    });
+
+    return res.status(201).json({ task });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch('/:taskId', authenticateToken, validate(taskUpdateSchema), async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.taskId);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const project = await Project.findById(task.project);
+    const canAccess = req.user.role === 'Admin' || String(project.owner) === String(req.user._id) || project.members.some((member) => String(member) === String(req.user._id));
+    if (!canAccess) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const body = req.body;
+    const updates = {};
+
+    if (body.title !== undefined) {
+      updates.title = body.title;
+    }
+    if (body.description !== undefined) {
+      updates.description = body.description;
+    }
+    if (body.priority !== undefined) {
+      updates.priority = body.priority;
+    }
+    if (body.labels !== undefined) {
+      updates.labels = body.labels;
+    }
+    if (body.status !== undefined) {
+      updates.status = body.status;
+    }
+    if (body.dueDate !== undefined) {
+      updates.dueDate = body.dueDate ? new Date(body.dueDate) : null;
+    }
+    if (body.assigneeId !== undefined) {
+      if (body.assigneeId) {
+        const assignee = await User.findById(body.assigneeId).select('_id');
+        if (!assignee) {
+          return res.status(400).json({ error: 'Assignee not found' });
+        }
+        updates.assignee = assignee._id;
+      } else {
+        updates.assignee = null;
+      }
+    }
+
+    const updatedTask = await Task.findByIdAndUpdate(task._id, updates, { new: true })
+      .populate('project', 'name color archivedAt')
+      .populate('assignee', 'name email role avatarColor title')
+      .populate('createdBy', 'name email role avatarColor title');
+
+    await Activity.create({
+      project: project._id,
+      task: task._id,
+      actor: req.user._id,
+      type: 'task.updated',
+      title: 'Task updated',
+      detail: updatedTask.title,
+    });
+
+    return res.json({ task: updatedTask });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch('/:taskId/status', authenticateToken, async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    const validStatuses = ['To Do', 'In Progress', 'Review', 'Done'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const task = await Task.findById(req.params.taskId);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const project = await Project.findById(task.project);
+    const canAccess = req.user.role === 'Admin' || String(project.owner) === String(req.user._id) || project.members.some((member) => String(member) === String(req.user._id));
+    if (!canAccess) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    task.status = status;
+    await task.save();
+
+    await Activity.create({
+      project: project._id,
+      task: task._id,
+      actor: req.user._id,
+      type: 'task.status.changed',
+      title: 'Task status updated',
+      detail: `${task.title} -> ${status}`,
+    });
+
+    return res.json({ task });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete('/:taskId', authenticateToken, async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.taskId);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const project = await Project.findById(task.project);
+    const canAccess = req.user.role === 'Admin' || String(project.owner) === String(req.user._id);
+    if (!canAccess) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    await Task.findByIdAndDelete(task._id);
+    return res.json({ success: true });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/:taskId/comments', authenticateToken, async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.taskId);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    const project = await Project.findById(task.project);
+    const canAccess = req.user.role === 'Admin'
+      || String(project.owner) === String(req.user._id)
+      || project.members.some((member) => String(member) === String(req.user._id));
+    if (!canAccess) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const comments = await Comment.find({ task: req.params.taskId })
+      .populate('author', 'name email role avatarColor title')
+      .sort({ createdAt: 1 })
+      .lean();
+
+    return res.json({ comments });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/:taskId/comments', authenticateToken, validate(commentSchema), async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.taskId);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const project = await Project.findById(task.project);
+    const canAccess = req.user.role === 'Admin' || String(project.owner) === String(req.user._id) || project.members.some((member) => String(member) === String(req.user._id));
+    if (!canAccess) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const mentions = Array.from(new Set((req.body.body.match(/@([a-zA-Z0-9._-]+)/g) || []).map((value) => value.slice(1))));
+    const mentionedUsers = mentions.length ? await User.find({ email: { $in: mentions.map((mention) => `${mention.toLowerCase()}`) } }).select('_id') : [];
+
+    const comment = await Comment.create({
+      task: task._id,
+      author: req.user._id,
+      body: req.body.body,
+      mentions: mentionedUsers.map((user) => user._id),
+    });
+
+    return res.status(201).json({ comment });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+module.exports = router;

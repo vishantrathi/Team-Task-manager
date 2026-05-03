@@ -5,7 +5,20 @@ const { User, Project } = require('./models');
 function getAccessToken(req) {
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
+    console.log('Auth header present');
     return authHeader.slice(7);
+  }
+
+  // Debug: log cookie keys (do not log sensitive values in production)
+  try {
+    const cookieKeys = Object.keys(req.cookies || {});
+    if (cookieKeys.length) {
+      console.log('Cookies received:', cookieKeys.join(', '));
+    } else {
+      console.log('No cookies received');
+    }
+  } catch (e) {
+    console.log('Cookie parsing error', e && e.message);
   }
 
   return req.cookies?.accessToken;
@@ -16,6 +29,7 @@ async function authenticateToken(req, res, next) {
     const token = getAccessToken(req);
 
     if (!token) {
+      console.log('No token found in header or cookies');
       return res.status(401).json({ error: 'Authentication required' });
     }
 
@@ -23,12 +37,14 @@ async function authenticateToken(req, res, next) {
     const user = await User.findById(payload.sub).select('-passwordHash -refreshTokenHash').lean();
 
     if (!user) {
+      console.log('Token valid but user not found', payload.sub);
       return res.status(401).json({ error: 'Authentication required' });
     }
 
     req.user = user;
     next();
   } catch (error) {
+    console.log('Token verification error:', error && error.message);
     return res.status(401).json({ error: 'Authentication required' });
   }
 }

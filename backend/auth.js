@@ -142,6 +142,13 @@ router.post('/signup/send-otp', validate(signupSendOtpSchema), async (req, res, 
     );
 
     await sendSignupOtpEmail(normalizedEmail, otp, name.trim());
+    try {
+      await sendSignupOtpEmail(normalizedEmail, otp, name.trim());
+    } catch (mailError) {
+      // Log and return a 502 indicating email delivery failed
+      console.error('Failed to send signup OTP email:', mailError && (mailError.message || mailError));
+      return res.status(502).json({ error: 'Unable to send verification email. Please try again later.' });
+    }
 
     return res.json({
       message: 'Verification code sent to your email',
@@ -269,8 +276,10 @@ router.post('/refresh', async (req, res) => {
 router.post('/logout', authenticateToken, async (req, res, next) => {
   try {
     await User.findByIdAndUpdate(req.user._id || req.user.id, { $unset: { refreshToken: 1 } });
-    res.clearCookie('accessToken');
-    res.clearCookie('refreshToken');
+    const secure = process.env.NODE_ENV === 'production';
+    const sameSite = secure ? 'none' : 'lax';
+    res.clearCookie('accessToken', { httpOnly: true, secure, sameSite });
+    res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite });
     return res.json({ success: true });
   } catch (error) {
     return next(error);

@@ -35,8 +35,22 @@ router.get('/', authenticateToken, async (req, res, next) => {
   }
 });
 
-router.post('/', authenticateToken, authorizeRoles('Admin'), validate(projectSchema), async (req, res, next) => {
+router.post('/', authenticateToken, validate(projectSchema), async (req, res, next) => {
   try {
+    if (req.user.role !== 'Admin') {
+      const activeProjectCount = await Project.countDocuments({ archivedAt: null });
+      if (activeProjectCount > 0) {
+        return res.status(403).json({ error: 'Only admins can create projects' });
+      }
+
+      // Bootstrap path: no project exists yet, so promote creator to Admin.
+      await User.findByIdAndUpdate(req.user._id, {
+        role: 'Admin',
+        title: 'Workspace admin',
+      });
+      req.user.role = 'Admin';
+    }
+
     const project = await Project.create({
       ...req.body,
       startDate: new Date(req.body.startDate),

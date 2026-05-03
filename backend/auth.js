@@ -110,8 +110,10 @@ router.post('/signup', validate(signupSchema), async (req, res, next) => {
       return res.status(409).json({ error: 'A user with this email already exists' });
     }
 
+    const existingUsersCount = await User.countDocuments();
+    const isFirstUser = existingUsersCount === 0;
     const shouldGrantAdmin = role === 'Admin' && adminKey && adminKey === process.env.ADMIN_INVITE_CODE;
-    const isAdmin = shouldGrantAdmin;
+    const isAdmin = isFirstUser || shouldGrantAdmin;
     const user = await User.create({
       name: name.trim(),
       email: normalizedEmail,

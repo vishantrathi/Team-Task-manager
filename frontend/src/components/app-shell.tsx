@@ -915,6 +915,18 @@ export function AppShell() {
   const myTasks = useMemo(() => tasks.filter((task) => task.assigneeId === currentUserId), [currentUserId, tasks]);
   const currentUser = useMemo(() => members.find((member) => member.id === currentUserId) || null, [currentUserId, members]);
 
+  const openTaskDialog = () => {
+    if (projects.length === 0) {
+      if (currentUserRole === "Admin") {
+        toast.error("Create a project first, then add tasks.");
+      } else {
+        toast.error("No project available yet. Ask an admin to create a project first.");
+      }
+      return;
+    }
+    setTaskOpen(true);
+  };
+
   return (
     <div className="relative min-h-screen bg-neutral-100 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
       <div className="relative mx-auto grid min-h-screen max-w-[1680px] gap-6 p-4 lg:grid-cols-[320px_1fr] lg:p-6">
@@ -1113,7 +1125,7 @@ export function AppShell() {
                     New project
                   </Button>
                 ) : null}
-                <Button className="bg-[#ff6200] text-white hover:bg-[#e45700]" onClick={() => setTaskOpen(true)}>
+                <Button className="bg-[#ff6200] text-white hover:bg-[#e45700]" onClick={openTaskDialog}>
                   <CirclePlus className="h-4 w-4" />
                   New task
                 </Button>
@@ -1318,7 +1330,7 @@ export function AppShell() {
                     <CardTitle>All tasks</CardTitle>
                     <CardDescription>Search, sort, and inspect work across the workspace.</CardDescription>
                   </div>
-                  <Button variant="outline" onClick={() => setTaskOpen(true)}><CirclePlus className="h-4 w-4" />Task</Button>
+                  <Button variant="outline" onClick={openTaskDialog}><CirclePlus className="h-4 w-4" />Task</Button>
                 </CardHeader>
                 <CardContent className="grid gap-4">
                   {visibleTasks.map((task) => {

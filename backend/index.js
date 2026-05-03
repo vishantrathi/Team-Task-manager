@@ -8,6 +8,12 @@ const { connectDatabase } = require('./db');
 const { errorHandler, notFound } = require('./middleware');
 
 const app = express();
+
+/** Must match backend `routePrefix` in root vercel.json. Override with SERVICE_ROUTE_PREFIX if you change it. */
+const serviceRoutePrefix = (process.env.SERVICE_ROUTE_PREFIX || (process.env.VERCEL ? '/_/backend' : '')).replace(/\/$/, '');
+const apiMountPath = serviceRoutePrefix ? `${serviceRoutePrefix}/api/v1` : '/api/v1';
+const rootMountPath = serviceRoutePrefix ? `${serviceRoutePrefix}/` : '/';
+
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map((origin) => origin.trim());
 
 app.use(helmet());
@@ -31,8 +37,20 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-app.use('/api/v1', require('./routes'));
-app.get('/', (req, res) => res.json({ name: 'Team Task Manager API', version: 'v1' }));
+/** Vercel Functions: ensure MongoDB before handling requests (no separate listen()). */
+if (process.env.VERCEL) {
+  app.use(async (req, res, next) => {
+    try {
+      await connectDatabase();
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+}
+
+app.use(apiMountPath, require('./routes'));
+app.get(rootMountPath, (req, res) => res.json({ name: 'Team Task Manager API', version: 'v1' }));
 app.use(notFound);
 app.use(errorHandler);
 
@@ -45,7 +63,11 @@ async function startServer() {
   });
 }
 
-startServer().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  startServer().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = app;

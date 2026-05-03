@@ -52,8 +52,7 @@ type AppState = {
   authenticating: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
-  requestSignupOtp: (input: { name: string; email: string; password: string; role?: "Admin" | "Member"; adminKey?: string }) => Promise<void>;
-  verifySignup: (email: string, otp: string) => Promise<void>;
+  signup: (input: { name: string; email: string; password: string; role?: "Admin" | "Member"; adminKey?: string }) => Promise<void>;
   initializeWorkspace: () => Promise<void>;
   loadTaskComments: (taskId: string) => Promise<void>;
   setTheme: (theme: ThemeMode) => void;
@@ -308,10 +307,10 @@ export const useAppStore = create<AppState>()(
           throw error;
         }
       },
-      requestSignupOtp: async (input) => {
+      signup: async (input) => {
         set({ authenticating: true, error: null });
         try {
-          await apiRequest("/auth/signup/send-otp", {
+          await apiRequest("/auth/signup", {
             method: "POST",
             body: JSON.stringify({
               ...input,
@@ -320,28 +319,12 @@ export const useAppStore = create<AppState>()(
               adminKey: input.adminKey?.trim(),
             }),
           });
-          set({ authenticating: false, error: null });
-        } catch (error) {
-          set({
-            authenticating: false,
-            error: error instanceof Error ? error.message : "Unable to send verification code",
-          });
-          throw error;
-        }
-      },
-      verifySignup: async (email, otp) => {
-        set({ authenticating: true, error: null });
-        try {
-          await apiRequest("/auth/signup/verify", {
-            method: "POST",
-            body: JSON.stringify({ email, otp }),
-          });
           await get().initializeWorkspace();
           set({ authenticating: false, error: null });
         } catch (error) {
           set({
             authenticating: false,
-            error: error instanceof Error ? error.message : "Unable to verify account",
+            error: error instanceof Error ? error.message : "Unable to create account",
           });
           throw error;
         }

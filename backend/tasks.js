@@ -233,6 +233,11 @@ router.patch('/:taskId/status', authenticateToken, async (req, res, next) => {
     task.status = status;
     await task.save();
 
+    const updatedTask = await Task.findById(task._id)
+      .populate('project', 'name color archivedAt')
+      .populate('assignee', 'name email role avatarColor title')
+      .populate('createdBy', 'name email role avatarColor title');
+
     await Activity.create({
       project: project._id,
       task: task._id,
@@ -242,7 +247,7 @@ router.patch('/:taskId/status', authenticateToken, async (req, res, next) => {
       detail: `${task.title} -> ${status}`,
     });
 
-    return res.json({ task });
+    return res.json({ task: updatedTask });
   } catch (error) {
     return next(error);
   }

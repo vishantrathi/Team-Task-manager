@@ -72,12 +72,14 @@ function setAuthCookies(res, accessToken, refreshToken) {
   const secure = process.env.NODE_ENV === 'production';
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
+    path: '/',
     sameSite: secure ? 'none' : 'lax',
     secure,
     maxAge: 15 * 60 * 1000,
   });
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
+    path: '/',
     sameSite: secure ? 'none' : 'lax',
     secure,
     maxAge: 30 * 24 * 60 * 60 * 1000,
@@ -278,8 +280,8 @@ router.post('/logout', authenticateToken, async (req, res, next) => {
     await User.findByIdAndUpdate(req.user._id || req.user.id, { $unset: { refreshToken: 1 } });
     const secure = process.env.NODE_ENV === 'production';
     const sameSite = secure ? 'none' : 'lax';
-    res.clearCookie('accessToken', { httpOnly: true, secure, sameSite });
-    res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite });
+    res.clearCookie('accessToken', { httpOnly: true, path: '/', secure, sameSite });
+    res.clearCookie('refreshToken', { httpOnly: true, path: '/', secure, sameSite });
     return res.json({ success: true });
   } catch (error) {
     return next(error);

@@ -8,13 +8,20 @@ const { connectDatabase } = require('./db');
 const { errorHandler, notFound } = require('./middleware');
 
 const app = express();
+// When running behind a reverse proxy (Railway, Vercel, etc.)
+// trust the first proxy so Express derives `req.ip` from X-Forwarded-For.
+// This is required so rate limiting and other IP-based logic work correctly.
+app.set('trust proxy', 1);
 
 /** Must match backend `routePrefix` in root vercel.json. Override with SERVICE_ROUTE_PREFIX if you change it. */
 const serviceRoutePrefix = (process.env.SERVICE_ROUTE_PREFIX || (process.env.VERCEL ? '/_/backend' : '')).replace(/\/$/, '');
 const apiMountPath = serviceRoutePrefix ? `${serviceRoutePrefix}/api/v1` : '/api/v1';
 const rootMountPath = serviceRoutePrefix ? `${serviceRoutePrefix}/` : '/';
 
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map((origin) => origin.trim());
+const allowedOrigins = [
+  'https://team-task-manager-eight-lime.vercel.app',
+  'http://localhost:3000',
+];
 
 app.use(helmet());
 app.use(cors({
@@ -25,10 +32,24 @@ app.use(cors({
 
     return callback(new Error('Not allowed by CORS'));
   },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true,
+}));
+app.options('*', cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
 }));
 app.use(rateLimit({
+  // 15 minutes
   windowMs: 15 * 60 * 1000,
+  // limit each IP to 300 requests per windowMs
   limit: 300,
   standardHeaders: true,
   legacyHeaders: false,

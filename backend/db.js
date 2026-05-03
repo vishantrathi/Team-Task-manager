@@ -32,7 +32,7 @@ async function connectDatabase() {
     await mongoose.connect(connectionString, {
       autoIndex: process.env.NODE_ENV !== 'production',
     });
-  } catch {
+  } catch (error) {
     throw new Error('Unable to connect to MongoDB. Set MONGODB_URI to a reachable MongoDB instance, or start MongoDB on the host when running the backend inside Docker.');
   }
 

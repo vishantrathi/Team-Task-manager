@@ -38,36 +38,47 @@ const commentSchema = z.object({
 
 router.get('/', authenticateToken, async (req, res, next) => {
   try {
-    let projectScope = {};
+    let query = { archivedAt: null };
+    
     if (req.user.role !== 'Admin') {
-      const accessibleIds = await Project.find({
+      const accessibleProjectIds = await Project.find({
         archivedAt: null,
         $or: [{ owner: req.user._id }, { members: req.user._id }],
       }).distinct('_id');
 
-      if (req.query.projectId) {
-        const allowed = accessibleIds.some((id) => String(id) === String(req.query.projectId));
-        if (!allowed) {
-          return res.status(403).json({ error: 'Forbidden' });
-        }
-        projectScope = { project: req.query.projectId };
-      } else {
-        projectScope = { project: { $in: accessibleIds } };
-      }
-    } else if (req.query.projectId) {
-      projectScope = { project: req.query.projectId };
+      // User can see tasks from projects they have access to OR tasks assigned to them
+      query.$or = [
+        { project: { $in: accessibleProjectIds } },
+        { assignee: req.user._id }
+      ];
     }
 
-    const filters = {
-      archivedAt: null,
-      ...projectScope,
-      ...(req.query.status ? { status: req.query.status } : {}),
-      ...(req.query.priority ? { priority: req.query.priority } : {}),
-      ...(req.query.assignee ? { assignee: req.query.assignee } : {}),
-      ...(req.query.q ? { title: { $regex: req.query.q, $options: 'i' } } : {}),
-    };
+    if (req.query.projectId) {
+      if (req.user.role !== 'Admin') {
+        const project = await Project.findById(req.query.projectId);
+        const hasAccess = project && (String(project.owner) === String(req.user._id) || project.members.some((member) => String(member) === String(req.user._id)));
+        if (!hasAccess) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
+      }
+      query.project = req.query.projectId;
+      delete query.$or; // If filtering by projectId, remove the $or clause
+    }
 
-    const tasks = await Task.find(filters)
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
+    if (req.query.priority) {
+      query.priority = req.query.priority;
+    }
+    if (req.query.assignee) {
+      query.assignee = req.query.assignee;
+    }
+    if (req.query.q) {
+      query.title = { $regex: req.query.q, $options: 'i' };
+    }
+
+    const tasks = await Task.find(query)
       .populate('project', 'name color archivedAt')
       .populate('assignee', 'name email role avatarColor title')
       .populate('createdBy', 'name email role avatarColor title')
@@ -130,7 +141,14 @@ router.patch('/:taskId', authenticateToken, validate(taskUpdateSchema), async (r
     }
 
     const project = await Project.findById(task.project);
-    const canAccess = req.user.role === 'Admin' || String(project.owner) === String(req.user._id) || project.members.some((member) => String(member) === String(req.user._id));
+    const isAdmin = req.user.role === 'Admin';
+    const isProjectOwner = String(project.owner) === String(req.user._id);
+    const isProjectMember = project.members.some((member) => String(member) === String(req.user._id));
+    const isAssignee = String(task.assignee) === String(req.user._id);
+    const isCreator = String(task.createdBy) === String(req.user._id);
+
+    // Allow updates by: admin, project owner, project member, task assignee, or task creator
+    const canAccess = isAdmin || isProjectOwner || isProjectMember || isAssignee || isCreator;
     if (!canAccess) {
       return res.status(403).json({ error: 'Forbidden' });
     }
@@ -202,7 +220,12 @@ router.patch('/:taskId/status', authenticateToken, async (req, res, next) => {
     }
 
     const project = await Project.findById(task.project);
-    const canAccess = req.user.role === 'Admin' || String(project.owner) === String(req.user._id) || project.members.some((member) => String(member) === String(req.user._id));
+    const isAdmin = req.user.role === 'Admin';
+    const isProjectOwner = String(project.owner) === String(req.user._id);
+    const isProjectMember = project.members.some((member) => String(member) === String(req.user._id));
+    const isAssignee = String(task.assignee) === String(req.user._id);
+
+    const canAccess = isAdmin || isProjectOwner || isProjectMember || isAssignee;
     if (!canAccess) {
       return res.status(403).json({ error: 'Forbidden' });
     }
@@ -233,8 +256,15 @@ router.delete('/:taskId', authenticateToken, async (req, res, next) => {
     }
 
     const project = await Project.findById(task.project);
-    const canAccess = req.user.role === 'Admin' || String(project.owner) === String(req.user._id);
-    if (!canAccess) {
+    const isAdmin = req.user.role === 'Admin';
+    const isProjectOwner = String(project.owner) === String(req.user._id);
+    const isProjectMember = project.members.some((member) => String(member) === String(req.user._id));
+    const isAssignee = String(task.assignee) === String(req.user._id);
+    const isCreator = String(task.createdBy) === String(req.user._id);
+
+    // Allow deletion by: admin, project owner, project member, task assignee, or task creator
+    const canDelete = isAdmin || isProjectOwner || isProjectMember || isAssignee || isCreator;
+    if (!canDelete) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 

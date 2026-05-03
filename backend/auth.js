@@ -132,7 +132,8 @@ router.post('/signup', validate(signupSchema), async (req, res, next) => {
 router.post('/login', validate(loginSchema), async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash');
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash');
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });

@@ -5,6 +5,8 @@ const { Activity, Comment, Project, Task, User } = require('./models');
 
 const router = express.Router();
 
+const taskUserFields = 'name email role avatarColor';
+
 const taskSchema = z.object({
   projectId: z.string().min(1),
   title: z.string().trim().min(2).max(160),
@@ -80,8 +82,8 @@ router.get('/', authenticateToken, async (req, res, next) => {
 
     const tasks = await Task.find(query)
       .populate('project', 'name color archivedAt')
-      .populate('assignee', 'name email role avatarColor title')
-      .populate('createdBy', 'name email role avatarColor title')
+      .populate('assignee', taskUserFields)
+      .populate('createdBy', taskUserFields)
       .sort({ updatedAt: -1 })
       .lean();
 
@@ -188,8 +190,8 @@ router.patch('/:taskId', authenticateToken, validate(taskUpdateSchema), async (r
 
     const updatedTask = await Task.findByIdAndUpdate(task._id, updates, { new: true })
       .populate('project', 'name color archivedAt')
-      .populate('assignee', 'name email role avatarColor title')
-      .populate('createdBy', 'name email role avatarColor title');
+      .populate('assignee', taskUserFields)
+      .populate('createdBy', taskUserFields);
 
     await Activity.create({
       project: project._id,
@@ -235,8 +237,8 @@ router.patch('/:taskId/status', authenticateToken, async (req, res, next) => {
 
     const updatedTask = await Task.findById(task._id)
       .populate('project', 'name color archivedAt')
-      .populate('assignee', 'name email role avatarColor title')
-      .populate('createdBy', 'name email role avatarColor title');
+      .populate('assignee', taskUserFields)
+      .populate('createdBy', taskUserFields);
 
     await Activity.create({
       project: project._id,
@@ -295,7 +297,7 @@ router.get('/:taskId/comments', authenticateToken, async (req, res, next) => {
     }
 
     const comments = await Comment.find({ task: req.params.taskId })
-      .populate('author', 'name email role avatarColor title')
+      .populate('author', taskUserFields)
       .sort({ createdAt: 1 })
       .lean();
 

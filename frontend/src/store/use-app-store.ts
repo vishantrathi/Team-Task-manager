@@ -143,6 +143,10 @@ type RawComment = {
 
 type ApiError = Error & { status?: number };
 
+type RawTaskResponse = {
+  task: RawTask;
+};
+
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api/v1").replace(/\/$/, "");
 
 function asId(value: unknown) {
@@ -248,6 +252,35 @@ function normalizeComment(raw: RawComment): TaskComment {
     mentions: raw.mentions || [],
     createdAt: raw.createdAt || new Date().toISOString(),
   };
+}
+
+function buildTaskActivity(task: Task, currentUserId: string, type: string, title: string, detail: string): ActivityItem {
+  return {
+    id: crypto.randomUUID(),
+    title,
+    detail,
+    type,
+    actorId: currentUserId,
+    projectId: task.projectId || undefined,
+    taskId: task.id,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function mergeTaskMembers(existingMembers: TeamMember[], rawTask: RawTask) {
+  const memberMap = new Map(existingMembers.map((member) => [member.id, member]));
+
+  const assignee = toMember(rawTask.assignee as RawUser);
+  if (assignee) {
+    memberMap.set(assignee.id, assignee);
+  }
+
+  const creator = toMember(rawTask.createdBy as RawUser);
+  if (creator) {
+    memberMap.set(creator.id, creator);
+  }
+
+  return Array.from(memberMap.values());
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -502,31 +535,61 @@ export const useAppStore = create<AppState>()(
         await get().initializeWorkspace();
       },
       createTask: async (input) => {
-        await apiRequest("/tasks", {
+        const response = await apiRequest<RawTaskResponse>("/tasks", {
           method: "POST",
           body: JSON.stringify(input),
         });
-        await get().initializeWorkspace();
+
+        const createdTask = normalizeTask(response.task);
+        set((state) => ({
+          tasks: [...state.tasks, createdTask],
+          members: mergeTaskMembers(state.members, response.task),
+          activities: [
+            buildTaskActivity(createdTask, state.currentUserId, "task.created", "Task created", createdTask.title),
+            ...state.activities,
+          ],
+        }));
       },
       updateTask: async (taskId, input) => {
-        await apiRequest(`/tasks/${taskId}`, {
+        const response = await apiRequest<RawTaskResponse>(`/tasks/${taskId}`, {
           method: "PATCH",
           body: JSON.stringify(input),
         });
-        await get().initializeWorkspace();
+
+        const updatedTask = normalizeTask(response.task);
+        set((state) => ({
+          tasks: state.tasks.map((task) => (task.id === taskId ? updatedTask : task)),
+          members: mergeTaskMembers(state.members, response.task),
+          activities: [
+            buildTaskActivity(updatedTask, state.currentUserId, "task.updated", "Task updated", updatedTask.title),
+            ...state.activities,
+          ],
+        }));
       },
       updateTaskStatus: async (taskId, status) => {
-        await apiRequest(`/tasks/${taskId}/status`, {
+        const response = await apiRequest<RawTaskResponse>(`/tasks/${taskId}/status`, {
           method: "PATCH",
           body: JSON.stringify({ status }),
         });
-        await get().initializeWorkspace();
+
+        const updatedTask = normalizeTask(response.task);
+        set((state) => ({
+          tasks: state.tasks.map((task) => (task.id === taskId ? updatedTask : task)),
+          members: mergeTaskMembers(state.members, response.task),
+          activities: [
+            buildTaskActivity(updatedTask, state.currentUserId, "task.status.changed", "Task status updated", `${updatedTask.title} -> ${status}`),
+            ...state.activities,
+          ],
+        }));
       },
       deleteTask: async (taskId) => {
         await apiRequest(`/tasks/${taskId}`, {
           method: "DELETE",
         });
-        await get().initializeWorkspace();
+        set((state) => ({
+          tasks: state.tasks.filter((task) => task.id !== taskId),
+          selectedTaskId: state.selectedTaskId === taskId ? null : state.selectedTaskId,
+        }));
       },
       addComment: async (taskId, body) => {
         await apiRequest(`/tasks/${taskId}/comments`, {
